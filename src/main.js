@@ -27,15 +27,26 @@ let nutButton = null;
 let win32Click = null;
 
 async function loadNut() {
-  const nut = require('@nut-tree-fork/nut-js');
-  nutMouse = nut.mouse;
-  nutButton = nut.Button;
-  nut.mouse.config.autoDelayMs = 0;
-  nut.mouse.config.mouseSpeed = 0;
+  try {
+    const nut = require('@nut-tree-fork/nut-js');
+    nutMouse = nut.mouse;
+    nutButton = nut.Button;
+    nut.mouse.config.autoDelayMs = 0;
+    nut.mouse.config.mouseSpeed = 0;
+    console.log('nut-js loaded successfully');
+  } catch (err) {
+    console.error('Failed to load nut-js:', err.message);
+    nutMouse = null;
+    nutButton = null;
+  }
 }
+
+let win32LoadAttempted = false;
 
 function loadWin32() {
   if (process.platform !== 'win32') return;
+  if (win32LoadAttempted) return;
+  win32LoadAttempted = true;
 
   try {
     const koffi = require('koffi');
@@ -43,18 +54,14 @@ function loadWin32() {
 
     // Win32 constants
     const INPUT_MOUSE = 0;
-    const MOUSEEVENTF_MOVE = 0x0001;
     const MOUSEEVENTF_LEFTDOWN = 0x0002;
     const MOUSEEVENTF_LEFTUP = 0x0004;
     const MOUSEEVENTF_RIGHTDOWN = 0x0008;
     const MOUSEEVENTF_RIGHTUP = 0x0010;
     const MOUSEEVENTF_MIDDLEDOWN = 0x0020;
     const MOUSEEVENTF_MIDDLEUP = 0x0040;
-    const MOUSEEVENTF_ABSOLUTE = 0x8000;
-    const SM_CXSCREEN = 0;
-    const SM_CYSCREEN = 1;
 
-    // Define structs
+    // Define structs matching Win32 INPUT on x64
     const MOUSEINPUT = koffi.struct('MOUSEINPUT', {
       dx: 'long',
       dy: 'long',
@@ -72,8 +79,9 @@ function loadWin32() {
 
     // Load functions
     const SendInput = user32.func('uint32 __stdcall SendInput(uint32 cInputs, INPUT *pInputs, int cbSize)');
-    const GetSystemMetrics = user32.func('int __stdcall GetSystemMetrics(int nIndex)');
     const SetCursorPos = user32.func('int __stdcall SetCursorPos(int X, int Y)');
+
+    const inputSize = koffi.sizeof(INPUT_struct);
 
     function getButtonFlags(buttonName) {
       switch (buttonName) {
@@ -86,36 +94,32 @@ function loadWin32() {
       }
     }
 
-    function sendMouseEvent(dwFlags, dx, dy) {
+    function sendMouseEvent(dwFlags) {
       const input = {
         type: INPUT_MOUSE,
         padding: [0, 0, 0, 0],
-        mi: { dx, dy, mouseData: 0, dwFlags, time: 0, dwExtraInfo: 0 },
+        mi: { dx: 0, dy: 0, mouseData: 0, dwFlags, time: 0, dwExtraInfo: 0 },
       };
-      SendInput(1, [input], koffi.sizeof(INPUT_struct));
-    }
-
-    function moveTo(x, y) {
-      SetCursorPos(x, y);
+      SendInput(1, [input], inputSize);
     }
 
     win32Click = {
       async click(buttonName, clickType, positionMode, fixedX, fixedY) {
         if (positionMode === 'fixed') {
-          moveTo(fixedX, fixedY);
+          SetCursorPos(fixedX, fixedY);
         }
 
         const flags = getButtonFlags(buttonName);
 
         if (clickType === 'double') {
-          sendMouseEvent(flags.down, 0, 0);
-          sendMouseEvent(flags.up, 0, 0);
+          sendMouseEvent(flags.down);
+          sendMouseEvent(flags.up);
           await delay(30);
-          sendMouseEvent(flags.down, 0, 0);
-          sendMouseEvent(flags.up, 0, 0);
+          sendMouseEvent(flags.down);
+          sendMouseEvent(flags.up);
         } else {
-          sendMouseEvent(flags.down, 0, 0);
-          sendMouseEvent(flags.up, 0, 0);
+          sendMouseEvent(flags.down);
+          sendMouseEvent(flags.up);
         }
       },
     };
@@ -238,6 +242,10 @@ async function performClickStandard(settings) {
 }
 
 async function performClickHardware(settings) {
+  // Lazy-load Win32 on first use
+  if (!win32Click && !win32LoadAttempted) {
+    loadWin32();
+  }
   if (!win32Click) {
     // Fallback to standard if hardware not available
     await performClickStandard(settings);
@@ -397,7 +405,6 @@ app.isQuitting = false;
 
 app.whenReady().then(async () => {
   await loadNut();
-  loadWin32();
   createTray();
   createWindow();
   registerHotkey(store.get('hotkey'));
