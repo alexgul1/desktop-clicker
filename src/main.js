@@ -115,6 +115,10 @@ function getMouseButton(buttonName) {
   }
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function performClick() {
   if (!clickerRunning) return;
 
@@ -128,9 +132,19 @@ async function performClick() {
     }
 
     if (settings.clickType === 'double') {
-      await nutMouse.doubleClick(button);
+      // Two separate press+release cycles with delays
+      await nutMouse.pressButton(button);
+      await delay(10);
+      await nutMouse.releaseButton(button);
+      await delay(30);
+      await nutMouse.pressButton(button);
+      await delay(10);
+      await nutMouse.releaseButton(button);
     } else {
-      await nutMouse.click(button);
+      // Separate press and release with a small delay for proper event detection
+      await nutMouse.pressButton(button);
+      await delay(10);
+      await nutMouse.releaseButton(button);
     }
 
     clicksDone++;
@@ -148,7 +162,7 @@ async function performClick() {
   }
 }
 
-function startClicking() {
+async function startClicking() {
   if (clickerRunning) return;
 
   const settings = store.store;
@@ -165,6 +179,11 @@ function startClicking() {
   if (tray) {
     tray.setToolTip('Desktop Clicker - RUNNING');
   }
+
+  // Wait for the target app/browser to receive focus after our window hides
+  await delay(300);
+
+  if (!clickerRunning) return; // User may have cancelled during the delay
 
   const interval = Math.max(1, settings.clickInterval);
 
