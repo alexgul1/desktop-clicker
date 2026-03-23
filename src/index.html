@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Desktop Clicker</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <h1>Desktop Clicker</h1>
+      <div class="status-badge" id="statusBadge">Stopped</div>
+    </header>
+
+    <main class="app-content">
+      <!-- Click Interval -->
+      <section class="card">
+        <h2 class="card-title">Click Interval</h2>
+        <div class="interval-row">
+          <div class="input-group">
+            <label for="hours">Hours</label>
+            <input type="number" id="hours" min="0" max="99" value="0">
+          </div>
+          <div class="input-group">
+            <label for="minutes">Min</label>
+            <input type="number" id="minutes" min="0" max="59" value="0">
+          </div>
+          <div class="input-group">
+            <label for="seconds">Sec</label>
+            <input type="number" id="seconds" min="0" max="59" value="0">
+          </div>
+          <div class="input-group">
+            <label for="milliseconds">Ms</label>
+            <input type="number" id="milliseconds" min="0" max="999" value="100">
+          </div>
+        </div>
+      </section>
+
+      <!-- Click Options -->
+      <section class="card">
+        <h2 class="card-title">Click Options</h2>
+        <div class="options-row">
+          <div class="input-group">
+            <label for="clickButton">Mouse Button</label>
+            <select id="clickButton">
+              <option value="left">Left</option>
+              <option value="right">Right</option>
+              <option value="middle">Middle</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <label for="clickType">Click Type</label>
+            <select id="clickType">
+              <option value="single">Single Click</option>
+              <option value="double">Double Click</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- Click Repeat -->
+      <section class="card">
+        <h2 class="card-title">Repeat</h2>
+        <div class="repeat-row">
+          <label class="radio-label">
+            <input type="radio" name="repeatMode" value="unlimited" checked>
+            <span>Until stopped</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="repeatMode" value="count">
+            <span>Repeat</span>
+            <input type="number" id="clickCount" min="1" max="999999" value="10" class="inline-input">
+            <span>times</span>
+          </label>
+        </div>
+      </section>
+
+      <!-- Click Position -->
+      <section class="card">
+        <h2 class="card-title">Cursor Position</h2>
+        <div class="position-row">
+          <label class="radio-label">
+            <input type="radio" name="positionMode" value="current" checked>
+            <span>Current position</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="positionMode" value="fixed">
+            <span>Fixed:</span>
+            <span class="coord-inputs">
+              X <input type="number" id="fixedX" min="0" value="0" class="inline-input coord-input">
+              Y <input type="number" id="fixedY" min="0" value="0" class="inline-input coord-input">
+            </span>
+            <button class="btn-small" id="pickPositionBtn" title="Pick position from screen">Pick</button>
+          </label>
+        </div>
+      </section>
+
+      <!-- Hotkey -->
+      <section class="card">
+        <h2 class="card-title">Hotkey</h2>
+        <div class="hotkey-row">
+          <span class="hotkey-label">Start / Stop:</span>
+          <button class="hotkey-btn" id="hotkeyBtn">F6</button>
+          <span class="hotkey-hint">Click to change</span>
+        </div>
+      </section>
+
+      <!-- Click Counter -->
+      <div class="counter-row">
+        <span>Clicks performed: <strong id="clickCounter">0</strong></span>
+      </div>
+    </main>
+
+    <footer class="app-footer">
+      <button class="btn btn-start" id="startBtn">Start (F6)</button>
+      <button class="btn btn-stop" id="stopBtn" disabled>Stop (F6)</button>
+    </footer>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
