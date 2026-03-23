@@ -24,8 +24,14 @@ let clickTimer = null;
 let clicksDone = 0;
 let nutMouse = null;
 let nutButton = null;
-let win32Click = null;
 
+// Win32 native objects (lazy-loaded)
+let win32 = null;
+let win32LoadAttempted = false;
+let hotkeyPollTimer = null;
+let hotkeyKeyWasDown = false;
+
+// ── nut-js loader ──────────────────────────────────────────────
 async function loadNut() {
   try {
     const nut = require('@nut-tree-fork/nut-js');
@@ -41,8 +47,7 @@ async function loadNut() {
   }
 }
 
-let win32LoadAttempted = false;
-
+// ── Win32 native API loader (koffi) ───────────────────────────
 function loadWin32() {
   if (process.platform !== 'win32') return;
   if (win32LoadAttempted) return;
@@ -52,7 +57,7 @@ function loadWin32() {
     const koffi = require('koffi');
     const user32 = koffi.load('user32.dll');
 
-    // Win32 constants
+    // Constants
     const INPUT_MOUSE = 0;
     const MOUSEEVENTF_LEFTDOWN = 0x0002;
     const MOUSEEVENTF_LEFTUP = 0x0004;
@@ -61,7 +66,7 @@ function loadWin32() {
     const MOUSEEVENTF_MIDDLEDOWN = 0x0020;
     const MOUSEEVENTF_MIDDLEUP = 0x0040;
 
-    // Define structs matching Win32 INPUT on x64
+    // Structs for SendInput
     const MOUSEINPUT = koffi.struct('MOUSEINPUT', {
       dx: 'long',
       dy: 'long',
@@ -73,13 +78,17 @@ function loadWin32() {
 
     const INPUT_struct = koffi.struct('INPUT', {
       type: 'uint32',
-      padding: koffi.array('uint8', 4), // alignment padding on x64
+      padding: koffi.array('uint8', 4),
       mi: MOUSEINPUT,
     });
 
-    // Load functions
+    // Win32 functions
     const SendInput = user32.func('uint32 __stdcall SendInput(uint32 cInputs, INPUT *pInputs, int cbSize)');
     const SetCursorPos = user32.func('int __stdcall SetCursorPos(int X, int Y)');
+    const GetAsyncKeyState = user32.func('short __stdcall GetAsyncKeyState(int vKey)');
+
+    // Legacy mouse_event function
+    const mouse_event = user32.func('void __stdcall mouse_event(uint32 dwFlags, uint32 dx, uint32 dy, uint32 dwData, uintptr_t dwExtraInfo)');
 
     const inputSize = koffi.sizeof(INPUT_struct);
 
@@ -94,45 +103,117 @@ function loadWin32() {
       }
     }
 
-    function sendMouseEvent(dwFlags) {
-      const input = {
-        type: INPUT_MOUSE,
-        padding: [0, 0, 0, 0],
-        mi: { dx: 0, dy: 0, mouseData: 0, dwFlags, time: 0, dwExtraInfo: 0 },
-      };
-      SendInput(1, [input], inputSize);
-    }
+    win32 = {
+      GetAsyncKeyState,
+      SetCursorPos,
 
-    win32Click = {
-      async click(buttonName, clickType, positionMode, fixedX, fixedY) {
-        if (positionMode === 'fixed') {
-          SetCursorPos(fixedX, fixedY);
-        }
-
-        const flags = getButtonFlags(buttonName);
-
-        if (clickType === 'double') {
-          sendMouseEvent(flags.down);
-          sendMouseEvent(flags.up);
-          await delay(30);
-          sendMouseEvent(flags.down);
-          sendMouseEvent(flags.up);
-        } else {
-          sendMouseEvent(flags.down);
-          sendMouseEvent(flags.up);
-        }
+      // SendInput-based click
+      sendInputClick(dwFlags) {
+        const input = {
+          type: INPUT_MOUSE,
+          padding: [0, 0, 0, 0],
+          mi: { dx: 0, dy: 0, mouseData: 0, dwFlags, time: 0, dwExtraInfo: 0 },
+        };
+        SendInput(1, [input], inputSize);
       },
+
+      // Legacy mouse_event-based click
+      mouseEventClick(dwFlags) {
+        mouse_event(dwFlags, 0, 0, 0, 0);
+      },
+
+      getButtonFlags,
     };
 
-    console.log('Win32 hardware click method loaded successfully');
+    console.log('Win32 native API loaded successfully');
   } catch (err) {
-    console.error('Failed to load Win32 click method:', err.message);
-    win32Click = null;
+    console.error('Failed to load Win32 API:', err.message);
+    win32 = null;
   }
 }
 
+// ── VK code mapping for GetAsyncKeyState ──────────────────────
+function hotkeyToVkCode(hotkey) {
+  const VK_MAP = {
+    'F1': 0x70, 'F2': 0x71, 'F3': 0x72, 'F4': 0x73,
+    'F5': 0x74, 'F6': 0x75, 'F7': 0x76, 'F8': 0x77,
+    'F9': 0x78, 'F10': 0x79, 'F11': 0x7A, 'F12': 0x7B,
+    'Space': 0x20, 'Return': 0x0D, 'Escape': 0x1B,
+    'Backspace': 0x08, 'Delete': 0x2E, 'Tab': 0x09,
+    'Home': 0x24, 'End': 0x23, 'PageUp': 0x21, 'PageDown': 0x22,
+    'Up': 0x26, 'Down': 0x28, 'Left': 0x25, 'Right': 0x27,
+    'Insert': 0x2D,
+  };
+
+  // Single key like "F6"
+  if (VK_MAP[hotkey]) return { vk: VK_MAP[hotkey], modifiers: [] };
+
+  // Combo like "CommandOrControl+Shift+F6"
+  const parts = hotkey.split('+');
+  const mainKey = parts[parts.length - 1];
+  const modifiers = parts.slice(0, -1);
+
+  let vk = VK_MAP[mainKey];
+  if (!vk && mainKey.length === 1) {
+    // A-Z or 0-9
+    vk = mainKey.toUpperCase().charCodeAt(0);
+  }
+
+  const modVks = [];
+  for (const mod of modifiers) {
+    if (mod === 'CommandOrControl' || mod === 'Control') modVks.push(0x11); // VK_CONTROL
+    if (mod === 'Alt') modVks.push(0x12); // VK_MENU
+    if (mod === 'Shift') modVks.push(0x10); // VK_SHIFT
+  }
+
+  return vk ? { vk, modifiers: modVks } : null;
+}
+
+function isKeyDown(vkCode) {
+  if (!win32) return false;
+  // GetAsyncKeyState returns short; bit 15 (0x8000) = currently pressed
+  const state = win32.GetAsyncKeyState(vkCode);
+  return (state & 0x8000) !== 0;
+}
+
+// ── Hotkey polling (works in fullscreen games) ────────────────
+function startHotkeyPolling() {
+  stopHotkeyPolling();
+
+  const hotkey = store.get('hotkey') || 'F6';
+  const parsed = hotkeyToVkCode(hotkey);
+  if (!parsed) {
+    console.error('Cannot parse hotkey for polling:', hotkey);
+    return;
+  }
+
+  hotkeyKeyWasDown = false;
+
+  hotkeyPollTimer = setInterval(() => {
+    // Check all modifier keys
+    const modsOk = parsed.modifiers.every((vk) => isKeyDown(vk));
+    const mainDown = isKeyDown(parsed.vk);
+    const keyDown = modsOk && mainDown;
+
+    // Detect key-down edge (was up, now down)
+    if (keyDown && !hotkeyKeyWasDown) {
+      toggleClicking();
+    }
+    hotkeyKeyWasDown = keyDown;
+  }, 30); // 30ms poll = responsive enough
+
+  console.log(`Hotkey polling started for "${hotkey}" (VK=0x${parsed.vk.toString(16)})`);
+}
+
+function stopHotkeyPolling() {
+  if (hotkeyPollTimer) {
+    clearInterval(hotkeyPollTimer);
+    hotkeyPollTimer = null;
+  }
+}
+
+// ── Tray & Window ─────────────────────────────────────────────
 function createTray() {
-  // Create a simple 16x16 icon programmatically
   const icon = nativeImage.createFromDataURL(
     'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAAbwAAAG8B8aLcQwAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAABhSURBVDiNY2AYBQwMDAz/GRgY/pMizsLAwMBACwMYGBgY2BkYGP6TYgALAwMDIzUMYGFgYGCkhgEsxGqmxAAWYjVTYgBMM8UGMDIwMDBRwwUsxGqmxACqs4FRMIoJAACMYhIRoHLfIQAAAABJRU5ErkJggg=='
   );
@@ -191,7 +272,6 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
 
-  // Minimize to tray instead of closing
   mainWindow.on('close', (e) => {
     if (!app.isQuitting) {
       e.preventDefault();
@@ -204,6 +284,7 @@ function createWindow() {
   });
 }
 
+// ── Click methods ─────────────────────────────────────────────
 function getMouseButton(buttonName) {
   switch (buttonName) {
     case 'right':
@@ -219,7 +300,9 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Method 1: nut-js (standard, cross-platform)
 async function performClickStandard(settings) {
+  if (!nutMouse) return;
   const button = getMouseButton(settings.clickButton);
 
   if (settings.clickPosition === 'fixed') {
@@ -241,23 +324,46 @@ async function performClickStandard(settings) {
   }
 }
 
-async function performClickHardware(settings) {
-  // Lazy-load Win32 on first use
-  if (!win32Click && !win32LoadAttempted) {
-    loadWin32();
+// Method 2: Win32 SendInput (hardware-level)
+async function performClickSendInput(settings) {
+  if (!win32) return;
+  const flags = win32.getButtonFlags(settings.clickButton);
+
+  if (settings.clickPosition === 'fixed') {
+    win32.SetCursorPos(settings.fixedX, settings.fixedY);
   }
-  if (!win32Click) {
-    // Fallback to standard if hardware not available
-    await performClickStandard(settings);
-    return;
+
+  if (settings.clickType === 'double') {
+    win32.sendInputClick(flags.down);
+    win32.sendInputClick(flags.up);
+    await delay(30);
+    win32.sendInputClick(flags.down);
+    win32.sendInputClick(flags.up);
+  } else {
+    win32.sendInputClick(flags.down);
+    win32.sendInputClick(flags.up);
   }
-  await win32Click.click(
-    settings.clickButton,
-    settings.clickType,
-    settings.clickPosition,
-    settings.fixedX,
-    settings.fixedY,
-  );
+}
+
+// Method 3: Win32 mouse_event (legacy API — some games only respond to this)
+async function performClickMouseEvent(settings) {
+  if (!win32) return;
+  const flags = win32.getButtonFlags(settings.clickButton);
+
+  if (settings.clickPosition === 'fixed') {
+    win32.SetCursorPos(settings.fixedX, settings.fixedY);
+  }
+
+  if (settings.clickType === 'double') {
+    win32.mouseEventClick(flags.down);
+    win32.mouseEventClick(flags.up);
+    await delay(30);
+    win32.mouseEventClick(flags.down);
+    win32.mouseEventClick(flags.up);
+  } else {
+    win32.mouseEventClick(flags.down);
+    win32.mouseEventClick(flags.up);
+  }
 }
 
 async function performClick() {
@@ -266,10 +372,21 @@ async function performClick() {
   const settings = store.store;
 
   try {
-    if (settings.clickMethod === 'hardware') {
-      await performClickHardware(settings);
-    } else {
-      await performClickStandard(settings);
+    // Lazy-load Win32 on first use of non-standard methods
+    if (settings.clickMethod !== 'standard' && !win32 && !win32LoadAttempted) {
+      loadWin32();
+    }
+
+    switch (settings.clickMethod) {
+      case 'sendinput':
+        await performClickSendInput(settings);
+        break;
+      case 'mouse_event':
+        await performClickMouseEvent(settings);
+        break;
+      default:
+        await performClickStandard(settings);
+        break;
     }
 
     clicksDone++;
@@ -287,6 +404,7 @@ async function performClick() {
   }
 }
 
+// ── Start / Stop / Toggle ─────────────────────────────────────
 async function startClicking() {
   if (clickerRunning) return;
 
@@ -297,7 +415,6 @@ async function startClicking() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('clicker-status', true);
     mainWindow.webContents.send('click-count-update', 0);
-    // Hide window so it doesn't intercept clicks
     mainWindow.hide();
   }
 
@@ -305,10 +422,9 @@ async function startClicking() {
     tray.setToolTip('Desktop Clicker - RUNNING');
   }
 
-  // Wait for the target app/browser to receive focus after our window hides
   await delay(300);
 
-  if (!clickerRunning) return; // User may have cancelled during the delay
+  if (!clickerRunning) return;
 
   const interval = Math.max(1, settings.clickInterval);
 
@@ -332,7 +448,6 @@ function stopClicking() {
 
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('clicker-status', false);
-    // Restore window when stopped
     mainWindow.show();
     mainWindow.focus();
   }
@@ -346,7 +461,23 @@ function toggleClicking() {
   }
 }
 
+// ── Hotkey registration ───────────────────────────────────────
 function registerHotkey(key) {
+  // On Windows: use GetAsyncKeyState polling (works in fullscreen games)
+  if (process.platform === 'win32') {
+    // Make sure Win32 is loaded for hotkey polling
+    if (!win32 && !win32LoadAttempted) {
+      loadWin32();
+    }
+    if (win32) {
+      startHotkeyPolling();
+      return;
+    }
+    // Fallback to globalShortcut if koffi failed
+    console.warn('Win32 not available, falling back to globalShortcut for hotkey');
+  }
+
+  // Non-Windows or fallback: use Electron globalShortcut
   globalShortcut.unregisterAll();
   try {
     globalShortcut.register(key, () => {
@@ -357,7 +488,7 @@ function registerHotkey(key) {
   }
 }
 
-// IPC handlers
+// ── IPC handlers ──────────────────────────────────────────────
 ipcMain.handle('get-settings', () => {
   return store.store;
 });
@@ -396,11 +527,11 @@ ipcMain.handle('get-version', () => {
 });
 
 ipcMain.handle('pick-position', () => {
-  // Return current cursor position for the "pick" feature
   const pos = screen.getCursorScreenPoint();
   return { x: pos.x, y: pos.y };
 });
 
+// ── App lifecycle ─────────────────────────────────────────────
 app.isQuitting = false;
 
 app.whenReady().then(async () => {
@@ -422,6 +553,7 @@ app.on('before-quit', () => {
 
 app.on('will-quit', () => {
   stopClicking();
+  stopHotkeyPolling();
   globalShortcut.unregisterAll();
 });
 

@@ -242,7 +242,8 @@ window.api.onClickCountUpdate((count) => {
   setIntervalFromMs(settings.clickInterval);
   clickButtonSelect.value = settings.clickButton;
   clickTypeSelect.value = settings.clickType;
-  clickMethodSelect.value = settings.clickMethod || 'standard';
+  const method = settings.clickMethod === 'hardware' ? 'sendinput' : (settings.clickMethod || 'standard');
+  clickMethodSelect.value = method;
 
   if (settings.clickCount > 0) {
     document.querySelector('input[name="repeatMode"][value="count"]').checked = true;
