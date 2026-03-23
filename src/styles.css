@@ -44,10 +44,22 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+.header-left {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
 .app-header h1 {
   font-size: 18px;
   font-weight: 600;
   letter-spacing: 0.5px;
+}
+
+.version-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 400;
 }
 
 .status-badge {
@@ -159,11 +171,13 @@ select {
 /* Options Row */
 .options-row {
   display: flex;
-  gap: 12px;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .options-row .input-group {
   flex: 1;
+  min-width: 120px;
 }
 
 /* Repeat / Position */

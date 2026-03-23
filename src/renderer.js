@@ -15,6 +15,7 @@ const millisecondsInput = document.getElementById('milliseconds');
 // Option inputs
 const clickButtonSelect = document.getElementById('clickButton');
 const clickTypeSelect = document.getElementById('clickType');
+const clickMethodSelect = document.getElementById('clickMethod');
 const clickCountInput = document.getElementById('clickCount');
 const fixedXInput = document.getElementById('fixedX');
 const fixedYInput = document.getElementById('fixedY');
@@ -59,6 +60,7 @@ function collectSettings() {
     clickInterval: Math.max(1, getIntervalMs()),
     clickButton: clickButtonSelect.value,
     clickType: clickTypeSelect.value,
+    clickMethod: clickMethodSelect.value,
     clickCount: repeatMode === 'count' ? (parseInt(clickCountInput.value) || 10) : 0,
     clickPosition: positionMode,
     fixedX: parseInt(fixedXInput.value) || 0,
@@ -155,7 +157,7 @@ stopBtn.addEventListener('click', async () => {
 // Auto-save on any setting change
 const settingInputs = [
   hoursInput, minutesInput, secondsInput, millisecondsInput,
-  clickButtonSelect, clickTypeSelect, clickCountInput,
+  clickButtonSelect, clickTypeSelect, clickMethodSelect, clickCountInput,
   fixedXInput, fixedYInput,
 ];
 
@@ -240,6 +242,7 @@ window.api.onClickCountUpdate((count) => {
   setIntervalFromMs(settings.clickInterval);
   clickButtonSelect.value = settings.clickButton;
   clickTypeSelect.value = settings.clickType;
+  clickMethodSelect.value = settings.clickMethod || 'standard';
 
   if (settings.clickCount > 0) {
     document.querySelector('input[name="repeatMode"][value="count"]').checked = true;
@@ -261,4 +264,8 @@ window.api.onClickCountUpdate((count) => {
   const status = await window.api.getStatus();
   setRunningState(status.running);
   clickCounter.textContent = status.clicks.toLocaleString();
+
+  // Show version
+  const ver = await window.api.getVersion();
+  document.getElementById('versionLabel').textContent = `v${ver}`;
 })();
