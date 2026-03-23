@@ -261,4 +261,8 @@ window.api.onClickCountUpdate((count) => {
   const status = await window.api.getStatus();
   setRunningState(status.running);
   clickCounter.textContent = status.clicks.toLocaleString();
+
+  // Show version
+  const ver = await window.api.getVersion();
+  document.getElementById('versionLabel').textContent = `v${ver}`;
 })();

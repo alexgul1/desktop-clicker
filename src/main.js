@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, globalShortcut, screen, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const Store = require('electron-store');
+const { version } = require('../package.json');
 
 const store = new Store({
   defaults: {
@@ -264,6 +265,10 @@ ipcMain.handle('get-status', () => {
 ipcMain.handle('get-mouse-position', () => {
   const pos = screen.getCursorScreenPoint();
   return { x: pos.x, y: pos.y };
+});
+
+ipcMain.handle('get-version', () => {
+  return version;
 });
 
 ipcMain.handle('pick-position', () => {
