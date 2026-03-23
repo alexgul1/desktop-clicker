@@ -13,6 +13,11 @@
   "build": {
     "appId": "com.desktop-clicker.app",
     "productName": "Desktop Clicker",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/@nut-tree-fork/**",
+      "node_modules/koffi/**"
+    ],
     "files": [
       "src/**/*",
       "assets/**/*"
@@ -20,6 +25,11 @@
     "win": {
       "target": "nsis",
       "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
     },
     "mac": {
       "target": "dmg",
