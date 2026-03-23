@@ -13,6 +13,7 @@ const store = new Store({
     clickPosition: 'current',
     fixedX: 0,
     fixedY: 0,
+    clickMethod: 'standard',
   },
 });
 
@@ -23,6 +24,7 @@ let clickTimer = null;
 let clicksDone = 0;
 let nutMouse = null;
 let nutButton = null;
+let win32Click = null;
 
 async function loadNut() {
   const nut = require('@nut-tree-fork/nut-js');
@@ -30,6 +32,99 @@ async function loadNut() {
   nutButton = nut.Button;
   nut.mouse.config.autoDelayMs = 0;
   nut.mouse.config.mouseSpeed = 0;
+}
+
+function loadWin32() {
+  if (process.platform !== 'win32') return;
+
+  try {
+    const koffi = require('koffi');
+    const user32 = koffi.load('user32.dll');
+
+    // Win32 constants
+    const INPUT_MOUSE = 0;
+    const MOUSEEVENTF_MOVE = 0x0001;
+    const MOUSEEVENTF_LEFTDOWN = 0x0002;
+    const MOUSEEVENTF_LEFTUP = 0x0004;
+    const MOUSEEVENTF_RIGHTDOWN = 0x0008;
+    const MOUSEEVENTF_RIGHTUP = 0x0010;
+    const MOUSEEVENTF_MIDDLEDOWN = 0x0020;
+    const MOUSEEVENTF_MIDDLEUP = 0x0040;
+    const MOUSEEVENTF_ABSOLUTE = 0x8000;
+    const SM_CXSCREEN = 0;
+    const SM_CYSCREEN = 1;
+
+    // Define structs
+    const MOUSEINPUT = koffi.struct('MOUSEINPUT', {
+      dx: 'long',
+      dy: 'long',
+      mouseData: 'uint32',
+      dwFlags: 'uint32',
+      time: 'uint32',
+      dwExtraInfo: 'uintptr_t',
+    });
+
+    const INPUT_struct = koffi.struct('INPUT', {
+      type: 'uint32',
+      padding: koffi.array('uint8', 4), // alignment padding on x64
+      mi: MOUSEINPUT,
+    });
+
+    // Load functions
+    const SendInput = user32.func('uint32 __stdcall SendInput(uint32 cInputs, INPUT *pInputs, int cbSize)');
+    const GetSystemMetrics = user32.func('int __stdcall GetSystemMetrics(int nIndex)');
+    const SetCursorPos = user32.func('int __stdcall SetCursorPos(int X, int Y)');
+
+    function getButtonFlags(buttonName) {
+      switch (buttonName) {
+        case 'right':
+          return { down: MOUSEEVENTF_RIGHTDOWN, up: MOUSEEVENTF_RIGHTUP };
+        case 'middle':
+          return { down: MOUSEEVENTF_MIDDLEDOWN, up: MOUSEEVENTF_MIDDLEUP };
+        default:
+          return { down: MOUSEEVENTF_LEFTDOWN, up: MOUSEEVENTF_LEFTUP };
+      }
+    }
+
+    function sendMouseEvent(dwFlags, dx, dy) {
+      const input = {
+        type: INPUT_MOUSE,
+        padding: [0, 0, 0, 0],
+        mi: { dx, dy, mouseData: 0, dwFlags, time: 0, dwExtraInfo: 0 },
+      };
+      SendInput(1, [input], koffi.sizeof(INPUT_struct));
+    }
+
+    function moveTo(x, y) {
+      SetCursorPos(x, y);
+    }
+
+    win32Click = {
+      async click(buttonName, clickType, positionMode, fixedX, fixedY) {
+        if (positionMode === 'fixed') {
+          moveTo(fixedX, fixedY);
+        }
+
+        const flags = getButtonFlags(buttonName);
+
+        if (clickType === 'double') {
+          sendMouseEvent(flags.down, 0, 0);
+          sendMouseEvent(flags.up, 0, 0);
+          await delay(30);
+          sendMouseEvent(flags.down, 0, 0);
+          sendMouseEvent(flags.up, 0, 0);
+        } else {
+          sendMouseEvent(flags.down, 0, 0);
+          sendMouseEvent(flags.up, 0, 0);
+        }
+      },
+    };
+
+    console.log('Win32 hardware click method loaded successfully');
+  } catch (err) {
+    console.error('Failed to load Win32 click method:', err.message);
+    win32Click = null;
+  }
 }
 
 function createTray() {
@@ -120,32 +215,53 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function performClickStandard(settings) {
+  const button = getMouseButton(settings.clickButton);
+
+  if (settings.clickPosition === 'fixed') {
+    await nutMouse.setPosition({ x: settings.fixedX, y: settings.fixedY });
+  }
+
+  if (settings.clickType === 'double') {
+    await nutMouse.pressButton(button);
+    await delay(10);
+    await nutMouse.releaseButton(button);
+    await delay(30);
+    await nutMouse.pressButton(button);
+    await delay(10);
+    await nutMouse.releaseButton(button);
+  } else {
+    await nutMouse.pressButton(button);
+    await delay(10);
+    await nutMouse.releaseButton(button);
+  }
+}
+
+async function performClickHardware(settings) {
+  if (!win32Click) {
+    // Fallback to standard if hardware not available
+    await performClickStandard(settings);
+    return;
+  }
+  await win32Click.click(
+    settings.clickButton,
+    settings.clickType,
+    settings.clickPosition,
+    settings.fixedX,
+    settings.fixedY,
+  );
+}
+
 async function performClick() {
   if (!clickerRunning) return;
 
   const settings = store.store;
-  const button = getMouseButton(settings.clickButton);
 
   try {
-    if (settings.clickPosition === 'fixed') {
-      const point = { x: settings.fixedX, y: settings.fixedY };
-      await nutMouse.setPosition(point);
-    }
-
-    if (settings.clickType === 'double') {
-      // Two separate press+release cycles with delays
-      await nutMouse.pressButton(button);
-      await delay(10);
-      await nutMouse.releaseButton(button);
-      await delay(30);
-      await nutMouse.pressButton(button);
-      await delay(10);
-      await nutMouse.releaseButton(button);
+    if (settings.clickMethod === 'hardware') {
+      await performClickHardware(settings);
     } else {
-      // Separate press and release with a small delay for proper event detection
-      await nutMouse.pressButton(button);
-      await delay(10);
-      await nutMouse.releaseButton(button);
+      await performClickStandard(settings);
     }
 
     clicksDone++;
@@ -281,6 +397,7 @@ app.isQuitting = false;
 
 app.whenReady().then(async () => {
   await loadNut();
+  loadWin32();
   createTray();
   createWindow();
   registerHotkey(store.get('hotkey'));

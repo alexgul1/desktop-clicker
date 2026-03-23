@@ -171,11 +171,13 @@ select {
 /* Options Row */
 .options-row {
   display: flex;
-  gap: 12px;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .options-row .input-group {
   flex: 1;
+  min-width: 120px;
 }
 
 /* Repeat / Position */
