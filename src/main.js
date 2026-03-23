@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, globalShortcut, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, screen, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const Store = require('electron-store');
 
@@ -16,6 +16,7 @@ const store = new Store({
 });
 
 let mainWindow = null;
+let tray = null;
 let clickerRunning = false;
 let clickTimer = null;
 let clicksDone = 0;
@@ -30,6 +31,49 @@ async function loadNut() {
   nut.mouse.config.mouseSpeed = 0;
 }
 
+function createTray() {
+  // Create a simple 16x16 icon programmatically
+  const icon = nativeImage.createFromDataURL(
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAAbwAAAG8B8aLcQwAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAABhSURBVDiNY2AYBQwMDAz/GRgY/pMizsLAwMBACwMYGBgY2BkYGP6TYgALAwMDIzUMYGFgYGCkhgEsxGqmxAAWYjVTYgBMM8UGMDIwMDBRwwUsxGqmxACqs4FRMIoJAACMYhIRoHLfIQAAAABJRU5ErkJggg=='
+  );
+
+  tray = new Tray(icon);
+  tray.setToolTip('Desktop Clicker');
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Show Window',
+      click: () => {
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      },
+    },
+    {
+      label: 'Start/Stop',
+      click: () => toggleClicking(),
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit',
+      click: () => {
+        stopClicking();
+        app.quit();
+      },
+    },
+  ]);
+
+  tray.setContextMenu(contextMenu);
+
+  tray.on('double-click', () => {
+    if (mainWindow) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 480,
@@ -37,6 +81,7 @@ function createWindow() {
     resizable: false,
     autoHideMenuBar: true,
     title: 'Desktop Clicker',
+    skipTaskbar: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -45,6 +90,14 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
+
+  // Minimize to tray instead of closing
+  mainWindow.on('close', (e) => {
+    if (!app.isQuitting) {
+      e.preventDefault();
+      mainWindow.hide();
+    }
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -105,6 +158,12 @@ function startClicking() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('clicker-status', true);
     mainWindow.webContents.send('click-count-update', 0);
+    // Hide window so it doesn't intercept clicks
+    mainWindow.hide();
+  }
+
+  if (tray) {
+    tray.setToolTip('Desktop Clicker - RUNNING');
   }
 
   const interval = Math.max(1, settings.clickInterval);
@@ -123,8 +182,15 @@ function stopClicking() {
     clickTimer = null;
   }
 
+  if (tray) {
+    tray.setToolTip('Desktop Clicker');
+  }
+
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('clicker-status', false);
+    // Restore window when stopped
+    mainWindow.show();
+    mainWindow.focus();
   }
 }
 
@@ -187,8 +253,11 @@ ipcMain.handle('pick-position', () => {
   return { x: pos.x, y: pos.y };
 });
 
+app.isQuitting = false;
+
 app.whenReady().then(async () => {
   await loadNut();
+  createTray();
   createWindow();
   registerHotkey(store.get('hotkey'));
 
@@ -197,6 +266,10 @@ app.whenReady().then(async () => {
       createWindow();
     }
   });
+});
+
+app.on('before-quit', () => {
+  app.isQuitting = true;
 });
 
 app.on('will-quit', () => {
